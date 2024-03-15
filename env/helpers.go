@@ -42,3 +42,12 @@ func getOptionalEnvAsDuration(name string, defaultVal int) time.Duration {
 
 	return time.Duration(defaultVal)
 }
+
+func getOptionalEnvAsFloat32(name string, defaultVal float32) float32 {
+	valueStr := getOptionalEnv(name, "")
+	if value, err := strconv.ParseFloat(valueStr, 32); err == nil {
+		return float32(value)
+	}
+
+	return defaultVal
+}

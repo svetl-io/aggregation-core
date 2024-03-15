@@ -9,7 +9,10 @@ require (
 	golang.org/x/sync v0.6.0
 )
 
+require github.com/gammazero/deque v0.2.0 // indirect
+
 require (
 	github.com/confluentinc/confluent-kafka-go v1.9.2
+	github.com/gammazero/workerpool v1.1.3
 	go.uber.org/multierr v1.10.0 // indirect
 )

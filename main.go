@@ -1,14 +1,17 @@
 package main
 
 import (
+	"aggregation-core/core"
 	"aggregation-core/env"
 	"aggregation-core/logging"
+	"aggregation-core/types"
 	"encoding/json"
 	"os"
 	"os/signal"
 	"strings"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/gammazero/workerpool"
 	"go.uber.org/zap"
 )
 
@@ -16,6 +19,7 @@ var (
 	sourceBroker = env.SOURCE_KAFKA_BROKER
 	topicsString = env.TOPICS
 	log          = logging.GetLogger()
+	poolSize     = env.POOL_SIZE
 )
 
 func main() {
@@ -46,6 +50,8 @@ func main() {
 		}
 	}
 
+	wp := workerpool.New(poolSize)
+
 	running := true
 	for running {
 		select {
@@ -56,7 +62,7 @@ func main() {
 
 			switch e := ev.(type) {
 			case *kafka.Message:
-				var message KafkaMessage
+				var message types.KafkaMessage
 				err := json.Unmarshal(e.Value, &message)
 
 				if err != nil {
@@ -65,6 +71,12 @@ func main() {
 				}
 
 				log.Info("received message", zap.Any("message", message))
+
+				wp.Submit(func() {
+					greenLightDuration := core.GetGreenLightDuration(message)
+					log.Debug("green light duration", zap.Any("duration", greenLightDuration))
+					core.SendGreenLightDurationToWS(greenLightDuration)
+				})
 			}
 		}
 	}

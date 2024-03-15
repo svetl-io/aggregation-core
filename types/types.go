@@ -1,4 +1,4 @@
-package main
+package types
 
 type KafkaMessage struct {
 	CarsCount        int    `json:"cars_count"`
