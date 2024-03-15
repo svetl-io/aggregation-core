@@ -10,22 +10,64 @@ import (
 	"os/signal"
 	"strings"
 
+	"net/http"
+
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/gammazero/workerpool"
+	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 )
 
 var (
-	sourceBroker = env.SOURCE_KAFKA_BROKER
-	topicsString = env.TOPICS
-	log          = logging.GetLogger()
-	poolSize     = env.POOL_SIZE
+	sourceBroker              = env.SOURCE_KAFKA_BROKER
+	topicsString              = env.TOPICS
+	log                       = logging.GetLogger()
+	poolSize                  = env.POOL_SIZE
+	greenLightDurationChannel = make(chan types.TrafficLightInfo)
+	upgrader                  = websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			return true
+		},
+	}
+	signals = make(chan os.Signal, 1)
 )
+
+func wsHandler(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Error("failed to upgrade connection", zap.Error(err))
+		return
+	}
+	defer conn.Close()
+
+	core.AddConnection(conn)
+	defer core.RemoveConnection(conn)
+
+	for {
+		select {
+		case <-signals:
+			return // stop on interrupt
+		default:
+			greenLightDuration := <-greenLightDurationChannel
+			core.BroadcastMessage(greenLightDuration)
+		}
+	}
+}
 
 func main() {
 	defer func() { log.Info("bye") }()
 
 	topics := strings.Split(topicsString, ",")
+
+	http.HandleFunc("/ws", wsHandler)
+
+	go func() {
+		err := http.ListenAndServe(":8080", nil)
+		if err != nil {
+			log.Error("failed to start http server", zap.Error(err))
+		}
+		log.Info("http server started")
+	}()
 
 	consumer, err := kafka.NewConsumer(&kafka.ConfigMap{
 		"bootstrap.servers": sourceBroker,
@@ -38,7 +80,6 @@ func main() {
 		return
 	}
 
-	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt)
 
 	for _, topic := range topics {
@@ -75,7 +116,11 @@ func main() {
 				wp.Submit(func() {
 					greenLightDuration := core.GetGreenLightDuration(message)
 					log.Debug("green light duration", zap.Any("duration", greenLightDuration))
-					core.SendGreenLightDurationToWS(greenLightDuration)
+					trafficLightInfo := types.TrafficLightInfo{
+						TrafficLightID:     message.TrafficLightId,
+						GreenLightDuration: greenLightDuration,
+					}
+					greenLightDurationChannel <- trafficLightInfo // traffic light info to ws channel
 				})
 			}
 		}
