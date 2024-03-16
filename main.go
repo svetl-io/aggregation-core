@@ -34,6 +34,7 @@ var (
 	signals           = make(chan os.Signal, 1)
 	trafficLightState = make(map[int]bool) // Key: traffic light ID, Value: true for green, false for red
 	stateMutex        = sync.RWMutex{}
+	pauseConsumption  bool
 )
 
 func wsHandler(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +73,14 @@ func sendRedLightState(trafficLightId int) {
 	defer stateMutex.RUnlock()
 	trafficLightEventChannel <- core.RedLightState(trafficLightId)
 	trafficLightState[trafficLightId] = false
+}
+
+func pauseConsumer() {
+	pauseConsumption = true
+}
+
+func resumeConsumer() {
+	pauseConsumption = false
 }
 
 func main() {
@@ -119,6 +128,11 @@ func main() {
 		case <-signals:
 			running = false
 		default:
+			if pauseConsumption {
+				time.Sleep(100 * time.Millisecond) // Sleep briefly to avoid busy-waiting
+				continue
+			}
+
 			ev := consumer.Poll(100)
 
 			switch e := ev.(type) {
@@ -140,9 +154,15 @@ func main() {
 
 					sendGreenLightState(message.TrafficLightId)
 
+					pauseConsumer()
 					time.Sleep(time.Duration(int(greenLightDuration)) * time.Second)
+					resumeConsumer()
 
 					sendRedLightState(message.TrafficLightId)
+
+					pauseConsumer()
+					time.Sleep(time.Duration(int(redLightDuration)) * time.Second)
+					resumeConsumer()
 				})
 			}
 		}
