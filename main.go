@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
+	"time"
 
 	"net/http"
 
@@ -19,17 +21,19 @@ import (
 )
 
 var (
-	sourceBroker              = env.SOURCE_KAFKA_BROKER
-	topicsString              = env.TOPICS
-	log                       = logging.GetLogger()
-	poolSize                  = env.POOL_SIZE
-	greenLightDurationChannel = make(chan types.TrafficLightInfo)
-	upgrader                  = websocket.Upgrader{
+	sourceBroker             = env.SOURCE_KAFKA_BROKER
+	topicsString             = env.TOPICS
+	log                      = logging.GetLogger()
+	poolSize                 = env.POOL_SIZE
+	trafficLightEventChannel = make(chan types.TrafficLightEvent)
+	upgrader                 = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},
 	}
-	signals = make(chan os.Signal, 1)
+	signals           = make(chan os.Signal, 1)
+	trafficLightState = make(map[int]bool) // Key: traffic light ID, Value: true for green, false for red
+	stateMutex        = sync.RWMutex{}
 )
 
 func wsHandler(w http.ResponseWriter, r *http.Request) {
@@ -48,10 +52,26 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		case <-signals:
 			return // stop on interrupt
 		default:
-			greenLightDuration := <-greenLightDurationChannel
-			core.BroadcastMessage(greenLightDuration)
+			trafficLightEvent := <-trafficLightEventChannel
+			core.BroadcastMessage(trafficLightEvent)
 		}
 	}
+}
+
+func sendGreenLightState(trafficLightId int) {
+	stateMutex.RLock()
+	defer stateMutex.RUnlock()
+	if !trafficLightState[trafficLightId] {
+		trafficLightEventChannel <- core.GreenLightState(trafficLightId)
+		trafficLightState[trafficLightId] = true
+	}
+}
+
+func sendRedLightState(trafficLightId int) {
+	stateMutex.RLock()
+	defer stateMutex.RUnlock()
+	trafficLightEventChannel <- core.RedLightState(trafficLightId)
+	trafficLightState[trafficLightId] = false
 }
 
 func main() {
@@ -114,13 +134,15 @@ func main() {
 				log.Info("received message", zap.Any("message", message))
 
 				wp.Submit(func() {
-					greenLightDuration := core.GetGreenLightDuration(message)
-					log.Debug("green light duration", zap.Any("duration", greenLightDuration))
-					trafficLightInfo := types.TrafficLightInfo{
-						TrafficLightID:     message.TrafficLightId,
-						GreenLightDuration: greenLightDuration,
-					}
-					greenLightDurationChannel <- trafficLightInfo // traffic light info to ws channel
+					greenLightDuration, redLightDuration := core.GetTrafficLightDuration(message)
+					log.Debug("green light duration", zap.Float32("duration", greenLightDuration))
+					log.Debug("red light duration", zap.Float32("duration", redLightDuration))
+
+					sendGreenLightState(message.TrafficLightId)
+
+					time.Sleep(time.Duration(int(greenLightDuration)) * time.Second)
+
+					sendRedLightState(message.TrafficLightId)
 				})
 			}
 		}

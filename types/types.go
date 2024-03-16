@@ -9,7 +9,7 @@ type KafkaMessage struct {
 	TrafficLightId   int    `json:"traffic_light_id"`
 }
 
-type TrafficLightInfo struct {
-	TrafficLightID     int     `json:"traffic_light_id"`
-	GreenLightDuration float32 `json:"green_light_duration"`
+type TrafficLightEvent struct {
+	TrafficLightID    int    `json:"traffic_light_id"`
+	TrafficLightState string `json:"traffic_light_state"`
 }

@@ -16,8 +16,8 @@ var (
 	connectionsMu sync.Mutex
 )
 
-func GetGreenLightDuration(message types.KafkaMessage) float32 {
-	return float32(getTotalVehiclesCount(message)) * env.VEHICLE_TIME_COEFFICIENT
+func GetTrafficLightDuration(message types.KafkaMessage) (float32, float32) {
+	return float32(getTotalVehiclesCount(message)) * env.VEHICLE_TIME_COEFFICIENT, 15.0
 }
 
 func getTotalVehiclesCount(message types.KafkaMessage) int {
@@ -55,4 +55,18 @@ func BroadcastMessage(message interface{}) {
 		}(conn)
 	}
 	wg.Wait()
+}
+
+func RedLightState(trafficLightId int) types.TrafficLightEvent {
+	return types.TrafficLightEvent{
+		TrafficLightID:    trafficLightId,
+		TrafficLightState: "red",
+	}
+}
+
+func GreenLightState(trafficLightId int) types.TrafficLightEvent {
+	return types.TrafficLightEvent{
+		TrafficLightID:    trafficLightId,
+		TrafficLightState: "green",
+	}
 }
